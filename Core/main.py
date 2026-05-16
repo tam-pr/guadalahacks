@@ -9,18 +9,17 @@ cap = cv2.VideoCapture(0) # Inicializar captura de video
 
 # Checar si la cámara abrió correctamente
 if not cap.isOpened():
-    print("Error: No se pudo abrir la cámara")
+    print("Error: No se pudo abrir la cámara.")
     exit()
 
-# 3. Arrancar el modelo 
-# with modelo_mediapipe_configurado as modelo:
-    
-    # Bucle de ejecución continua
-    # while la_captura_este_abierta:
+with mp_hands as model:
+    while cap.isOpened():
+        success, frame = cap.read()
+        if not success:
+            print("Ignorando fotograma vacío.")
+            continue
         
-        # A. Leer el frame actual de la cámara
-        
-        # B. Convertir el frame de BGR (formato por defecto de OpenCV) a RGB (formato que exige MediaPipe)
+        image_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB) # OpenCV lee en BGR, lo convertimos a RGB para MediaPipe
         
         # C. Pasar el frame RGB al modelo para que haga la inferencia (el tracking)
         
