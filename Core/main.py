@@ -2,9 +2,8 @@ import cv2
 import mediapipe as mp
 import numpy as np
 
-# 1. Configuración del Motor (MediaPipe)
-# Inicializar aquí las utilidades de dibujo (mp.solutions.drawing_utils)
-# Inicializar aquí el modelo a usar (ej. mp.solutions.holistic o mp.solutions.hands)
+mp_drawing = mp.solutions.drawings_utils # Utilidades de dibujo
+mp_hands = mp.solutions.holistic # Modelo 
 
 # 2. Captura del Entorno (OpenCV)
 # Inicia la captura de video apuntando a cámara web (índice 0)
