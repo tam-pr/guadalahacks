@@ -3,7 +3,7 @@ import mediapipe as mp
 import numpy as np
 
 mp_drawing = mp.solutions.drawings_utils # Utilidades de dibujo
-mp_hands = mp.solutions.holistic # Modelo 
+mp_holistic = mp.solutions.holistic # Modelo 
 
 cap = cv2.VideoCapture(0) # Inicializar captura de video
 
@@ -12,22 +12,34 @@ if not cap.isOpened():
     print("Error: No se pudo abrir la cámara.")
     exit()
 
-with mp_hands as model:
+with mp_holistic as model:
     while cap.isOpened():
         success, frame = cap.read()
         if not success:
             print("Ignorando fotograma vacío.")
             continue
         
-        image_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB) # OpenCV lee en BGR, lo convertimos a RGB para MediaPipe
+        image_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB) # Convertir a RGB para MediaPipe
         
-        # C. Pasar el frame RGB al modelo para que haga la inferencia (el tracking)
+        results = model.process(image_rgb) # Procesar la imagen
+                
+        # Extraer las coordenadas y dibujar los landmarks en el frame para ver que funcione
         
-        # D. Extraer las coordenadas y (opcionalmente) dibujar los landmarks en el frame para ver que funcione
+        if results.face_landmarks:
+            mp_drawing.draw_landmarks(frame, results.face_landmarks, mp_holistic.FACEMESH_TESSELATION)
+        if results.pose_landmarks:
+            mp_drawing.draw_landmarks(frame, results.pose_landmarks, mp_holistic.POSE_CONNECTIONS)
+        if results.left_hand_landmarks:
+            mp_drawing.draw_landmarks(frame, results.left_hand_landmarks, mp_holistic.HAND_CONNECTIONS)
+        if results.right_hand_landmarks:
+            mp_drawing.draw_landmarks(frame, results.right_hand_landmarks, mp_holistic.HAND_CONNECTIONS)
         
-        # E. Mostrar el frame en una ventana interactiva
+        cv2.imshow("Detección Holistic en Tiempo Real", frame) # Mostrar el frame en una ventana interactiva
         
-        # F. Escuchar el teclado para romper el bucle (ej. si se presiona la tecla 'q')
+        # Escuchar el teclado para romper el bucle (ej. si se presiona la tecla 'q')
+        
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break 
 
-# 4. Limpieza (Para no trabar la cámara)
-# Libera la captura de video y destruye todas las ventanas
+cap.release()  # Libera la captura de video
+cv2.destroyAllWindows()  # Destruye todas las ventanas
