@@ -5,8 +5,12 @@ import numpy as np
 mp_drawing = mp.solutions.drawings_utils # Utilidades de dibujo
 mp_hands = mp.solutions.holistic # Modelo 
 
-# 2. Captura del Entorno (OpenCV)
-# Inicia la captura de video apuntando a cámara web (índice 0)
+cap = cv2.VideoCapture(0) # Inicializar captura de video
+
+# Checar si la cámara abrió correctamente
+if not cap.isOpened():
+    print("Error: No se pudo abrir la cámara")
+    exit()
 
 # 3. Arrancar el modelo 
 # with modelo_mediapipe_configurado as modelo:
