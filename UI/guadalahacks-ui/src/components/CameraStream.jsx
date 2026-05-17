@@ -1,210 +1,155 @@
 import { useEffect, useRef, useState } from "react";
 
 export default function CameraStream() {
-  const videoRef = useRef(null);
+  const socketRef = useRef(null);
+  const [connected, setConnected] = useState(false);
+  const [prediction, setPrediction] = useState("Waiting...");
+  const [confidence, setConfidence] = useState(0);
+  const [sentence, setSentence] = useState("");
+  const [currentMode, setCurrentMode] = useState("WORDS");
+  const [videoFrame, setVideoFrame] = useState(null);
+  
+  // 🎙️ NEW AUDIO STATES
+  const [audioEnabled, setAudioEnabled] = useState(true);
+  const prevSentenceRef = useRef("");
 
-  const [streaming, setStreaming] = useState(false);
-  const [error, setError] = useState("");
-
-  // front/back phone camera
-  const [facingMode, setFacingMode] = useState("environment");
-
-  // AI mode
-  const [mode, setMode] = useState("spelling");
-
-  // translated output
-  const [translatedText, setTranslatedText] = useState("Waiting for translation...");
-
-  // detect mobile
-  const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-
+  // ==========================================
+  // WEBSOCKET CONNECTION
+  // ==========================================
   useEffect(() => {
-    return () => {
-      stopCamera();
+    const ws = new WebSocket("ws://127.0.0.1:8000/ws");
+    socketRef.current = ws;
+
+    ws.onopen = () => setConnected(true);
+    
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.prediction) setPrediction(data.prediction);
+        if (data.confidence !== undefined) setConfidence(data.confidence);
+        if (data.sentence !== undefined) setSentence(data.sentence);
+        if (data.mode) setCurrentMode(data.mode);
+        if (data.image) setVideoFrame(`data:image/jpeg;base64,${data.image}`);
+      } catch (err) {
+        console.error("Error reading backend message:", err);
+      }
     };
+
+    ws.onclose = () => setConnected(false);
+    return () => ws.close();
   }, []);
 
-  const startCamera = async () => {
-    try {
-      setStreaming(true);
-      setError("");
+  // ==========================================
+  // 🎙️ TEXT-TO-SPEECH ENGINE
+  // ==========================================
+  useEffect(() => {
+    if (!audioEnabled) {
+      prevSentenceRef.current = sentence;
+      return;
+    }
 
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode,
-        },
-        audio: false,
-      });
-
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-
-        // Safari/iPhone fix
-        await videoRef.current.play();
+    // Check if new text was ADDED to the sentence
+    if (sentence.length > prevSentenceRef.current.length) {
+      // Slice out ONLY the brand new word or letter
+      const addedText = sentence.slice(prevSentenceRef.current.length).trim();
+      
+      if (addedText) {
+        window.speechSynthesis.cancel(); // Stop current speech to avoid overlapping echoes
+        const utterance = new SpeechSynthesisUtterance(addedText);
+        utterance.lang = "es-MX"; // Mexican Spanish Native Pronunciation
+        utterance.rate = 1.0; 
+        window.speechSynthesis.speak(utterance);
       }
+    } 
+    // If the sentence was erased completely (Global Fist Erase)
+    else if (sentence.length === 0 && prevSentenceRef.current.length > 0) {
+        window.speechSynthesis.cancel();
+        const utterance = new SpeechSynthesisUtterance("Borrado");
+        utterance.lang = "es-MX";
+        window.speechSynthesis.speak(utterance);
+    }
+    
+    prevSentenceRef.current = sentence;
+  }, [sentence, audioEnabled]);
 
-      // fake AI output test
-      setTimeout(() => {
-        if (mode === "spelling") {
-          setTranslatedText("H-E-L-L-O");
-        } else {
-          setTranslatedText("Hello");
-        }
-      }, 2000);
-
-    } catch (err) {
-      console.error(err);
-      setError("Could not access camera");
-      setStreaming(false);
+  const sendCommand = (cmd) => {
+    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+      socketRef.current.send(cmd);
     }
   };
 
-  const stopCamera = () => {
-    if (!videoRef.current) return;
-
-    const stream = videoRef.current.srcObject;
-
-    if (stream instanceof MediaStream) {
-      stream.getTracks().forEach((track) => track.stop());
-    }
-
-    videoRef.current.srcObject = null;
-    setStreaming(false);
-  };
-
-  const switchCamera = async () => {
-    const newFacingMode = facingMode === "environment" ? "user" : "environment";
-    setFacingMode(newFacingMode);
-
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: newFacingMode,
-        },
-        audio: false,
-      });
-
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
-      }
-
-      setStreaming(true);
-    } catch (err) {
-      console.error(err);
+  const readFullSentence = () => {
+    if (sentence.trim() !== "") {
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(sentence);
+      utterance.lang = "es-MX";
+      window.speechSynthesis.speak(utterance);
     }
   };
 
   return (
-    <div style={styles.container}>
-      <h1>Sign Language Translator</h1>
-
-      {error && <p style={styles.error}>{error}</p>}
-
-      {/* Force mirroring on both cameras so your right hand always appears on your right side */}
-      <video
-        ref={videoRef}
-        autoPlay
-        playsInline
-        muted
-        style={{
-          ...styles.video,
-          display: streaming ? "block" : "none",
-          transform: "scaleX(-1)" 
-        }}
-      />
-
-      {/* CAMERA BUTTONS */}
-      <div style={styles.buttons}>
-        <button onClick={startCamera}>Open Camera</button>
-        <button onClick={stopCamera}>Stop Camera</button>
-        {isMobile && <button onClick={switchCamera}>Switch Camera</button>}
-      </div>
-
-      {/* MODE SWITCH */}
-      <div style={styles.buttons}>
-        <button
-          onClick={() => setMode("spelling")}
-          style={mode === "spelling" ? styles.activeButton : styles.button}
+    <div style={{ textAlign: "center", padding: "20px", fontFamily: "sans-serif" }}>
+      
+      {/* STATUS & AUDIO BANNERS */}
+      <div style={{ display: "flex", justifyContent: "center", gap: "15px", marginBottom: "15px" }}>
+        <span style={{ padding: "8px 16px", borderRadius: "20px", fontWeight: "bold", backgroundColor: connected ? "#10B981" : "#EF4444", color: "white" }}>
+          {connected ? "AI PIPELINE: ACTIVE" : "AI PIPELINE: OFFLINE"}
+        </span>
+        <button 
+          onClick={() => setAudioEnabled(!audioEnabled)}
+          style={{ padding: "8px 16px", borderRadius: "20px", fontWeight: "bold", cursor: "pointer", border: "none", backgroundColor: audioEnabled ? "#8B5CF6" : "#6B7280", color: "white" }}
         >
-          Spelling
-        </button>
-
-        <button
-          onClick={() => setMode("phrases")}
-          style={mode === "phrases" ? styles.activeButton : styles.button}
-        >
-          Phrases
+          {audioEnabled ? "🔊 Voice: ON" : "🔇 Voice: MUTED"}
         </button>
       </div>
 
-      <p>
-        Current Mode: <strong>{mode}</strong>
-      </p>
+      {/* THE CAMERA MONITOR */}
+      <div style={{ display: "flex", justifyContent: "center", marginBottom: "20px" }}>
+        {videoFrame ? (
+          <img src={videoFrame} alt="AI Camera Feed" style={{ width: "450px", borderRadius: "12px", boxShadow: "0 4px 12px rgba(0,0,0,0.2)" }} />
+        ) : (
+          <div style={{ width: "450px", height: "337px", backgroundColor: "#222", borderRadius: "12px", display: "flex", alignItems: "center", justifyContent: "center", color: "#666" }}>
+            Waiting for Python Camera Feed...
+          </div>
+        )}
+      </div>
 
-      <p>Status: {streaming ? "Streaming" : "Stopped"}</p>
+      {/* CONTROL ACTIONS */}
+      <div style={{ display: "flex", gap: "10px", justifyContent: "center" }}>
+        <button 
+          onClick={() => sendCommand("TOGGLE_MODE")} 
+          style={{ padding: "12px 24px", fontWeight: "bold", cursor: "pointer", backgroundColor: "#0070f3", color: "white", borderRadius: "6px", border: "none" }}
+        >
+          Toggle Mode (Active: {currentMode})
+        </button>
+        
+        <button 
+          onClick={() => sendCommand("CLEAR_SENTENCE")} 
+          style={{ padding: "12px 24px", fontWeight: "bold", cursor: "pointer", backgroundColor: "#dc2626", color: "white", borderRadius: "6px", border: "none" }}
+        >
+          Clear Sentence
+        </button>
+      </div>
 
-      {/* TRANSLATION OUTPUT */}
-      <div style={styles.translationBox}>
-        <h2>Translation</h2>
-        <p>{translatedText}</p>
+      {/* AI PREDICTION OUTPUT */}
+      <div style={{ marginTop: "30px" }}>
+        <h3>Current Sign: <span style={{ color: "#0070f3", textTransform: "capitalize" }}>{prediction.replace(/_/g, ' ')}</span></h3>
+        <h4 style={{ color: confidence >= 75 ? "#10B981" : "#F59E0B" }}>Confidence: {confidence.toFixed(1)}%</h4>
+        
+        <div style={{ marginTop: "20px", padding: "25px", backgroundColor: "#f8fafc", borderRadius: "8px", border: "2px solid #e2e8f0" }}>
+          <h3 style={{ margin: "0 0 10px 0", color: "#475569" }}>Assembled Sentence:</h3>
+          <p style={{ fontSize: "28px", fontWeight: "bold", color: "#0f172a", minHeight: "40px", margin: 0 }}>
+            {sentence || "Waiting for signs..."}
+          </p>
+          
+          <button 
+            onClick={readFullSentence}
+            style={{ marginTop: "15px", padding: "8px 16px", cursor: "pointer", backgroundColor: "#e2e8f0", color: "#334155", border: "1px solid #cbd5e1", borderRadius: "4px", fontWeight: "bold" }}
+          >
+            ▶️ Play Full Sentence
+          </button>
+        </div>
       </div>
     </div>
   );
 }
-
-const styles = {
-  container: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    gap: "16px",
-    padding: "20px",
-    fontFamily: "Arial",
-  },
-
-  video: {
-    width: "100%",
-    maxWidth: "700px",
-    borderRadius: "12px",
-    border: "2px solid black",
-    backgroundColor: "black",
-  },
-
-  buttons: {
-    display: "flex",
-    gap: "10px",
-    flexWrap: "wrap",
-  },
-
-  button: {
-    padding: "10px 18px",
-    border: "1px solid black",
-    background: "white",
-    cursor: "pointer",
-    borderRadius: "8px",
-  },
-
-  activeButton: {
-    padding: "10px 18px",
-    border: "1px solid black",
-    background: "black",
-    color: "white",
-    cursor: "pointer",
-    borderRadius: "8px",
-  },
-
-  translationBox: {
-    marginTop: "20px",
-    padding: "20px",
-    width: "100%",
-    maxWidth: "700px",
-    border: "2px solid black",
-    borderRadius: "12px",
-    backgroundColor: "#f5f5f5",
-  },
-
-  error: {
-    color: "red",
-  },
-};
