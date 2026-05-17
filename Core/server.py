@@ -9,20 +9,18 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 import mediapipe as mp
 
-# =====================================================================
-# 1. LOAD THE AI BRAINS
-# =====================================================================
+# Constants and model configuration
 DYNAMIC_ACTIONS = ['Hola, mi nombre es', 'gracias', 'perdon', 'por_favor', 'ayudame', 'Angel', 'mas', 'menos', 'parar', 'empezar', 'borrar']
 SEQUENCE_LENGTH = 45
 INPUT_SIZE = 126
 HIDDEN_SIZE = 64
 NUM_CLASSES = len(DYNAMIC_ACTIONS)
 
-print("🧠 Loading Tier 1 Brain (Static Alphabet)...")
+# Load static model
 with open('lsm_model.pkl', 'rb') as f:
     static_model = pickle.load(f)
 
-print("🧠 Loading Tier 2 Brain (Dynamic Words)...")
+# Define and load dynamic model
 class LsmLSTM(nn.Module):
     def __init__(self):
         super(LsmLSTM, self).__init__()
@@ -37,9 +35,11 @@ dynamic_model = LsmLSTM()
 dynamic_model.load_state_dict(torch.load('dynamic_lsm_model.pth', map_location=torch.device('cpu')))
 dynamic_model.eval()
 
+# Initialize MediaPipe
 mp_hands = mp.solutions.hands
 hands = mp_hands.Hands(static_image_mode=False, max_num_hands=2, min_detection_confidence=0.7, min_tracking_confidence=0.7)
 
+# Feature extraction helpers
 def extract_static_features(hand_landmarks):
     raw_coords = []
     for landmark in hand_landmarks.landmark:
@@ -61,22 +61,17 @@ def extract_dynamic_features(results):
             else: rh_data = scaled
     return np.concatenate([lh_data, rh_data])
 
-# =====================================================================
-# 2. FASTAPI APPLICATION SETUP
-# =====================================================================
+# App setup
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
+# Websocket endpoint
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
-    print("✅ React UI Connected to Direct Hardware Pipeline!")
     
     cap = cv2.VideoCapture(0)
     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1) 
-    
-    if not cap.isOpened():
-        print("❌ ERROR: OpenCV could not open your webcam.")
     
     sequence = []
     sentence = ""
@@ -86,20 +81,19 @@ async def websocket_endpoint(websocket: WebSocket):
     
     try:
         while cap.isOpened():
-            # 1. Handle UI Buttons
+            # Handle UI commands
             try:
                 command = await asyncio.wait_for(websocket.receive_text(), timeout=0.001)
                 if command == "TOGGLE_MODE":
                     current_mode = "SPELL" if current_mode == "WORDS" else "WORDS"
                     sequence = []
-                    print(f"🔄 Mode Switched -> {current_mode}")
                 elif command == "CLEAR_SENTENCE":
                     sentence = ""
                     last_word_added = ""
             except asyncio.TimeoutError:
                 pass 
             
-            # 2. Hardware Frame Capture
+            # Capture and process frame
             ret, frame = cap.read()
             if not ret:
                 await asyncio.sleep(0.01)
@@ -117,6 +111,7 @@ async def websocket_endpoint(websocket: WebSocket):
             sequence.append(frame_features)
             sequence = sequence[-SEQUENCE_LENGTH:]
             
+            # Cooldown logic
             cooldown_limit = 15 if current_mode == "WORDS" else 2
 
             if not hands_visible:
@@ -126,7 +121,7 @@ async def websocket_endpoint(websocket: WebSocket):
             else:
                 missing_frames = 0 
                 
-                # 🚀 THE FIX: Isolate logic strictly by mode
+                # Process WORDS mode
                 if current_mode == "WORDS":
                     dynamic_clear_triggered = False
                     
@@ -138,7 +133,7 @@ async def websocket_endpoint(websocket: WebSocket):
                             pred_idx = torch.argmax(probs).item()
                             dyn_confidence = probs[pred_idx].item() * 100
                             
-                            # Global erase override ONLY happens in WORDS mode now
+                            # Global erase
                             if dyn_confidence >= 80 and DYNAMIC_ACTIONS[pred_idx].lower() == 'borrar':
                                 if DYNAMIC_ACTIONS[pred_idx] != last_word_added:
                                     sentence = ""
@@ -163,8 +158,8 @@ async def websocket_endpoint(websocket: WebSocket):
                         else:
                             current_prediction = "Waiting..."
                                     
+                # Process SPELL mode
                 elif current_mode == "SPELL":
-                    # Spelling mode is completely protected from the dynamic model
                     static_features = extract_static_features(results.multi_hand_landmarks[0])
                     prediction = static_model.predict(static_features)[0]
                     prob = np.max(static_model.predict_proba(static_features)) * 100
@@ -174,20 +169,19 @@ async def websocket_endpoint(websocket: WebSocket):
                         current_prediction = prediction
                         if current_prediction != last_word_added:
                             if current_prediction.lower() == 'borrar':
-                                sentence = sentence[:-1] # Clean single backspace
+                                sentence = sentence[:-1] 
                             elif current_prediction.lower() == 'espacio':
                                 sentence += " "
                             else:
                                 sentence += current_prediction
                             last_word_added = current_prediction
 
-            # 3. DRAW AND ENCODE FRAME FOR REACT
+            # Render and encode image
             cv2.putText(frame, f"AI Mode: {current_mode}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 100), 2)
-            
             _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 50])
             b64_image = base64.b64encode(buffer).decode('utf-8')
 
-            # 4. SEND EVERYTHING TO BROWSER
+            # Send payload to React
             await websocket.send_json({
                 "prediction": current_prediction,
                 "confidence": float(confidence),
@@ -199,6 +193,6 @@ async def websocket_endpoint(websocket: WebSocket):
             await asyncio.sleep(0.001) 
             
     except WebSocketDisconnect:
-        print("❌ React UI disconnected.")
+        pass
     finally:
         cap.release()

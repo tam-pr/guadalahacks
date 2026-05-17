@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 export default function CameraStream() {
+  // State setup
   const socketRef = useRef(null);
   const [connected, setConnected] = useState(false);
   const [prediction, setPrediction] = useState("Waiting...");
@@ -8,14 +9,10 @@ export default function CameraStream() {
   const [sentence, setSentence] = useState("");
   const [currentMode, setCurrentMode] = useState("WORDS");
   const [videoFrame, setVideoFrame] = useState(null);
-  
-  // 🎙️ NEW AUDIO STATES
   const [audioEnabled, setAudioEnabled] = useState(true);
   const prevSentenceRef = useRef("");
 
-  // ==========================================
-  // WEBSOCKET CONNECTION
-  // ==========================================
+  // Websocket connection
   useEffect(() => {
     const ws = new WebSocket("ws://127.0.0.1:8000/ws");
     socketRef.current = ws;
@@ -39,29 +36,26 @@ export default function CameraStream() {
     return () => ws.close();
   }, []);
 
-  // ==========================================
-  // 🎙️ TEXT-TO-SPEECH ENGINE
-  // ==========================================
+  // Text-to-speech engine
   useEffect(() => {
     if (!audioEnabled) {
       prevSentenceRef.current = sentence;
       return;
     }
 
-    // Check if new text was ADDED to the sentence
+    // Trigger speech on new additions
     if (sentence.length > prevSentenceRef.current.length) {
-      // Slice out ONLY the brand new word or letter
       const addedText = sentence.slice(prevSentenceRef.current.length).trim();
       
       if (addedText) {
-        window.speechSynthesis.cancel(); // Stop current speech to avoid overlapping echoes
+        window.speechSynthesis.cancel(); 
         const utterance = new SpeechSynthesisUtterance(addedText);
-        utterance.lang = "es-MX"; // Mexican Spanish Native Pronunciation
+        utterance.lang = "es-MX"; 
         utterance.rate = 1.0; 
         window.speechSynthesis.speak(utterance);
       }
     } 
-    // If the sentence was erased completely (Global Fist Erase)
+    // Trigger speech on full erase
     else if (sentence.length === 0 && prevSentenceRef.current.length > 0) {
         window.speechSynthesis.cancel();
         const utterance = new SpeechSynthesisUtterance("Borrado");
@@ -72,12 +66,14 @@ export default function CameraStream() {
     prevSentenceRef.current = sentence;
   }, [sentence, audioEnabled]);
 
+  // Command dispatcher
   const sendCommand = (cmd) => {
     if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
       socketRef.current.send(cmd);
     }
   };
 
+  // Playback handler
   const readFullSentence = () => {
     if (sentence.trim() !== "") {
       window.speechSynthesis.cancel();
@@ -87,10 +83,10 @@ export default function CameraStream() {
     }
   };
 
+  // UI render
   return (
     <div style={{ textAlign: "center", padding: "20px", fontFamily: "sans-serif" }}>
       
-      {/* STATUS & AUDIO BANNERS */}
       <div style={{ display: "flex", justifyContent: "center", gap: "15px", marginBottom: "15px" }}>
         <span style={{ padding: "8px 16px", borderRadius: "20px", fontWeight: "bold", backgroundColor: connected ? "#10B981" : "#EF4444", color: "white" }}>
           {connected ? "AI PIPELINE: ACTIVE" : "AI PIPELINE: OFFLINE"}
@@ -103,7 +99,6 @@ export default function CameraStream() {
         </button>
       </div>
 
-      {/* THE CAMERA MONITOR */}
       <div style={{ display: "flex", justifyContent: "center", marginBottom: "20px" }}>
         {videoFrame ? (
           <img src={videoFrame} alt="AI Camera Feed" style={{ width: "450px", borderRadius: "12px", boxShadow: "0 4px 12px rgba(0,0,0,0.2)" }} />
@@ -114,7 +109,6 @@ export default function CameraStream() {
         )}
       </div>
 
-      {/* CONTROL ACTIONS */}
       <div style={{ display: "flex", gap: "10px", justifyContent: "center" }}>
         <button 
           onClick={() => sendCommand("TOGGLE_MODE")} 
@@ -131,7 +125,6 @@ export default function CameraStream() {
         </button>
       </div>
 
-      {/* AI PREDICTION OUTPUT */}
       <div style={{ marginTop: "30px" }}>
         <h3>Current Sign: <span style={{ color: "#0070f3", textTransform: "capitalize" }}>{prediction.replace(/_/g, ' ')}</span></h3>
         <h4 style={{ color: confidence >= 75 ? "#10B981" : "#F59E0B" }}>Confidence: {confidence.toFixed(1)}%</h4>
